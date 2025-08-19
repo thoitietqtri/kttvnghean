@@ -1,0 +1,45 @@
+name: Auto Upload BanTin
+
+on:
+  schedule:
+    - cron: '30 21 * * *'   # 04:30 ICT = 21:30 UTC ngày hôm trước
+  workflow_dispatch:        # cho phép bấm chạy tay
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Playwright (Chromium)
+        run: |
+          pip install playwright python-dotenv requests
+          python -m playwright install --with-deps chromium
+
+      # Kiểm tra file bantin/ban_tin.pdf đã được push chưa
+      - name: Ensure bulletin exists
+        run: |
+          test -f "bantin/ban_tin.pdf" || (echo "Thiếu bantin/ban_tin.pdf. Hãy push lúc 17:00." && exit 1)
+
+      - name: Run uploader
+        env:
+          PORTAL_URL: ${{ secrets.PORTAL_URL }}
+          USERNAME:   ${{ secrets.USERNAME }}
+          PASSWORD:   ${{ secrets.PASSWORD }}
+        run: |
+          python tools/playwright_uploader.py
+
+      - name: Upload artifact (proof)
+        uses: actions/upload-artifact@v4
+        with:
+          name: upload-proof
+          path: |
+            after_upload.png
+            tools/*.log
+          if-no-files-found: ignore
