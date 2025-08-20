@@ -43,7 +43,14 @@ async def upload_file(page, file_path):
 
     # Đến trang upload thẳng sau khi đăng nhập
     await page.goto(UPLOAD_URL, wait_until="domcontentloaded", timeout=TIMEOUT)
-
+    selects = page.locator("select")
+try:
+    await selects.nth(0).select_option(label="Quảng Trị")
+    await selects.nth(1).select_option(label="Khí tượng thủy văn Bình thường")
+    await selects.nth(2).select_option(label="Thời tiết điểm đến 10 ngày")
+    await selects.nth(3).select_option(label="Thời tiết điểm đến 10 ngày")
+except Exception:
+    pass  # nếu select không bắt buộc hoặc đã default thì bỏ qua
     # Trên trang có 2 input file: "Upload Bản tin Dự báo" và "Upload Hồ sơ dự báo"
     file_inputs = page.locator('input[type="file"]')
     count = await file_inputs.count()
