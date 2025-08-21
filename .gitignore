@@ -1,61 +1,14 @@
-# ---- Python build/cache ----
 __pycache__/
 *.py[cod]
-*.so
-*.egg
-*.egg-info/
-.eggs/
-
-# ---- Logs & Debug ----
-*.log
-logs/
-*.out
-*.err
-
-# ---- Environment ----
 .env
 .venv/
 venv/
-ENV/
-env.bak/
-
-# ---- Byte-compiled / optimized / DLL files ----
-*.pyd
-*.pyo
-*.dll
-
-# ---- Packaging ----
-build/
-develop-eggs/
-dist/
-downloads/
-wheels/
-*.manifest
-*.spec
-
-# ---- Unit test / coverage ----
-htmlcov/
-.tox/
-.nox/
-.coverage
-coverage.xml
-*.cover
-*.py,cover
-.cache
-.pytest_cache/
-nosetests.xml
-test-results.xml
-
-# ---- Jupyter Notebook ----
-.ipynb_checkpoints
-*.ipynb
-
-# ---- Editors & IDE ----
 .vscode/
 .idea/
-*.swp
-*.swo
-
-# ---- Artifacts từ workflow ----
+*.log
+logs/
 after_upload.png
 tools/*.log
+/*.pdf
+!bantin/*.pdf
+
