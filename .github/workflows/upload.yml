@@ -2,15 +2,59 @@ name: Auto Upload BanTin
 
 on:
   schedule:
-    - cron: '30 21 * * *'   # 04:30 ICT = 21:30 UTC ngày hôm trước
-  workflow_dispatch:        # cho phép bấm chạy tay
+    # 04:30 ICT hằng ngày = 21:30 UTC ngày hôm trước
+    - cron: '30 21 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: auto-upload-bantin
+  cancel-in-progress: true
 
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Nhận user/pass + URL từ Secrets
+    env:
+      PORTAL_URL: ${{ secrets.PORTAL_URL }}   # vd: http://222.255.11.117:8888/Login.aspx
+      UPLOAD_URL: ${{ secrets.UPLOAD_URL }}   # vd: http://222.255.11.117:8888/UploadFile.aspx
+      USERNAME:   ${{ secrets.USERNAME }}     # QTRI
+      PASSWORD:   ${{ secrets.PASSWORD }}     # Qtri
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      # Kiểm tra Secrets có đủ chưa
+      - name: Check required secrets
+        shell: bash
+        run: |
+          check() {
+            if [ -z "$1" ]; then
+              echo "::error::$2 is missing. Add it in Settings → Secrets and variables → Actions."
+              exit 1
+            fi
+          }
+          check "${USERNAME}" "USERNAME"
+          check "${PASSWORD}" "PASSWORD"
+          if [ -z "${PORTAL_URL}" ]; then
+            echo "::notice::PORTAL_URL not set; will default to http://222.255.11.117:8888/Login.aspx"
+          fi
+          if [ -z "${UPLOAD_URL}" ]; then
+            echo "::notice::UPLOAD_URL not set; will default to http://222.255.11.117:8888/UploadFile.aspx"
+          fi
+
+      # Phải có ÍT NHẤT 1 file PDF trong thư mục bantin/ (giữ nguyên tên gốc)
+      - name: Ensure PDFs exist under bantin/
+        shell: bash
+        run: |
+          if ls bantin/*.pdf 1> /dev/null 2>&1; then
+            echo "Found PDF(s) in bantin/."
+          else
+            echo "::error::No PDFs found in bantin/. Upload your files (keep original names) into bantin/."
+            exit 1
+          fi
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -18,24 +62,27 @@ jobs:
           python-version: '3.11'
 
       - name: Install Playwright (Chromium)
+        shell: bash
         run: |
+          pip install --upgrade pip
           pip install playwright python-dotenv requests
           python -m playwright install --with-deps chromium
 
-      # Kiểm tra file bantin/ban_tin.pdf đã được push chưa
-      - name: Ensure bulletin exists
+      # Kiểm tra kết nối tới Login.aspx (chỉ cảnh báo; không fail job)
+      - name: Reachability check (login page)
+        shell: bash
+        continue-on-error: true
         run: |
-          test -f "bantin/ban_tin.pdf" || (echo "Thiếu bantin/ban_tin.pdf. Hãy push lúc 17:00." && exit 1)
+          url="${PORTAL_URL:-http://222.255.11.117:8888/Login.aspx}"
+          echo "Checking: $url"
+          curl -I --max-time 15 "$url" || echo "::warning::Cannot reach $url from GitHub runners. If internal-only, use a self-hosted runner."
 
       - name: Run uploader
-        env:
-          PORTAL_URL: ${{ secrets.PORTAL_URL }}
-          USERNAME:   ${{ secrets.USERNAME }}
-          PASSWORD:   ${{ secrets.PASSWORD }}
+        shell: bash
         run: |
           python tools/playwright_uploader.py
 
-      - name: Upload artifact (proof)
+      - name: Upload artifact (screenshots/logs)
         uses: actions/upload-artifact@v4
         with:
           name: upload-proof
