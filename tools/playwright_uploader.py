@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
-import os, re, asyncio, logging
+import os
+import re
+import asyncio
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
-from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+from playwright.async_api import async_playwright
 
-TIMEOUT = 30_000  # ms
+# ===== Cấu hình chung =====
+TIMEOUT = 60_000  # ms (tăng từ 30s lên 60s cho ổn định)
 BANTIN_DIR = Path("bantin")
 
-# Log
+# Log file
 os.makedirs("tools", exist_ok=True)
 logging.basicConfig(
     filename="tools/uploader.log",
@@ -16,9 +20,17 @@ logging.basicConfig(
     encoding="utf-8"
 )
 
+# URL & Secrets
 LOGIN_URL  = os.getenv("PORTAL_URL") or os.getenv("PORTAL_LOGIN_URL") or "http://222.255.11.117:8888/Login.aspx"
 UPLOAD_URL = os.getenv("UPLOAD_URL") or "http://222.255.11.117:8888/UploadFile.aspx"
 
+# (Tuỳ chọn) label cho dropdown – đặt qua Secrets nếu cần
+UNIT_LABEL = os.getenv("UNIT_LABEL")  # ví dụ: "Đài KTTV Nghệ An"
+DOC_LABEL  = os.getenv("DOC_LABEL")   # ví dụ: "Khí tượng thủy văn Bình thường"
+CAT1_LABEL = os.getenv("CAT1_LABEL")  # ví dụ: "Thời tiết điểm đến 10 ngày"
+CAT2_LABEL = os.getenv("CAT2_LABEL")  # ví dụ: "Thời tiết điểm đến 10 ngày"
+
+# Regex lấy ngày từ tên file: YYYYMMDD + (tuỳ chọn) _HHMM
 DATE_RE = re.compile(r"(20\d{6})(?:[_-]?(\d{4}))?")  # YYYYMMDD + optional HHMM
 
 def score_by_name(p: Path) -> int:
@@ -36,20 +48,19 @@ def score_by_name(p: Path) -> int:
 def pick_latest_files() -> tuple[Path, Path | None]:
     """
     Chọn file bản tin & hồ sơ trong thư mục bantin/ theo quy ước:
-    - Hồ sơ: tên bắt đầu bằng 'HS' hoặc chứa '_HS' (không phân biệt hoa thường)
+    - Hồ sơ: tên chứa 'HS' (không phân biệt hoa/thường), ví dụ: HS_..., ..._HS_...
     - Bản tin: còn lại.
-    - Nếu không tìm thấy hồ sơ -> để None (sau đó sẽ dùng lại bản tin).
+    - Nếu không tìm thấy hồ sơ -> trả None (KHÔNG dùng lại bản tin).
     """
     if not BANTIN_DIR.exists():
-        raise SystemExit("Chưa có thư mục 'bantin/'. Hãy upload file vào đó.")
+        raise SystemExit("Chưa có thư mục 'bantin/'. Hãy upload file PDF vào đó.")
 
     pdfs = [p for p in BANTIN_DIR.glob("*.pdf") if p.is_file()]
     if not pdfs:
         raise SystemExit("Không tìm thấy file PDF nào trong 'bantin/'.")
 
     def is_hoso(p: Path) -> bool:
-        n = p.name.lower()
-        return n.startswith("hs") or "_hs" in n
+        return "hs" in p.name.lower()
 
     hoso_list = [p for p in pdfs if is_hoso(p)]
     bantin_list = [p for p in pdfs if not is_hoso(p)]
@@ -57,15 +68,15 @@ def pick_latest_files() -> tuple[Path, Path | None]:
     bantin = max(bantin_list, key=score_by_name, default=None)
     hoso = max(hoso_list, key=score_by_name, default=None)
 
-    # Nếu vẫn không xác định được "bản tin", lấy PDF có điểm cao nhất bất kể tên
     if bantin is None:
+        # Nếu không xác định được "bản tin", lấy PDF có điểm cao nhất bất kể tên
         bantin = max(pdfs, key=score_by_name)
 
     logging.info(f"Chọn BẢN TIN: {bantin.name}")
     if hoso:
         logging.info(f"Chọn HỒ SƠ : {hoso.name}")
     else:
-        logging.info("Không có HỒ SƠ riêng -> sẽ dùng lại file BẢN TIN cho input thứ 2.")
+        logging.info("Không có HỒ SƠ riêng -> sẽ chỉ upload file BẢN TIN.")
     return bantin, hoso
 
 async def login(page, username, password):
@@ -76,47 +87,91 @@ async def login(page, username, password):
     await user_in.fill(username, timeout=TIMEOUT)
     await pass_in.fill(password, timeout=TIMEOUT)
 
+    # Bấm nút Đăng nhập (ưu tiên get_by_role + regex)
+    import re as _re
     try:
-        await page.getByRole("button", name=lambda s: "đăng nhập" in s.lower()).click(timeout=5000)
+        await page.get_by_role("button", name=_re.compile(r"đăng\s*nhập", _re.I)).click(timeout=TIMEOUT)
     except Exception:
         await page.locator("button:has-text('Đăng nhập'), input[type=submit][value*='Đăng nhập']").first.click(timeout=TIMEOUT)
 
-    await page.wait_for_timeout(2500)
+    # chờ form xử lý
+    await page.wait_for_timeout(1500)
+
+async def maybe_select_dropdowns(page):
+    """
+    Nếu trang yêu cầu chọn dropdown theo đơn vị/loại tài liệu/chuyên mục,
+    có thể cấu hình qua Secrets (UNIT_LABEL/DOC_LABEL/CAT1_LABEL/CAT2_LABEL).
+    Bỏ qua nếu không đặt.
+    """
+    if not any([UNIT_LABEL, DOC_LABEL, CAT1_LABEL, CAT2_LABEL]):
+        return
+    selects = page.locator("select")
+    try:
+        idx = 0
+        if UNIT_LABEL:
+            await selects.nth(idx).select_option(label=UNIT_LABEL); idx += 1
+        if DOC_LABEL:
+            await selects.nth(idx).select_option(label=DOC_LABEL); idx += 1
+        if CAT1_LABEL:
+            await selects.nth(idx).select_option(label=CAT1_LABEL); idx += 1
+        if CAT2_LABEL:
+            await selects.nth(idx).select_option(label=CAT2_LABEL); idx += 1
+        await page.wait_for_timeout(500)  # cho postback/dropdown ổn định
+        logging.info("Đã chọn dropdown theo Secrets (nếu có).")
+    except Exception as e:
+        logging.info(f"Dropdown có thể không cần hoặc index khác: {e}")
 
 async def upload_file(page, bantin_path: Path, hoso_path: Path | None):
     await page.goto(UPLOAD_URL, wait_until="domcontentloaded", timeout=TIMEOUT)
 
-    # Nếu cần chọn dropdown, thêm ở đây (đã để mặc định nên em tạm bỏ qua).
-    # Ví dụ:
-    # selects = page.locator("select")
-    # try:
-    #     await selects.nth(0).select_option(label="Nghệ An")
-    #     await selects.nth(1).select_option(label="Khí tượng thủy văn Bình thường")
-    #     await selects.nth(2).select_option(label="Thời tiết điểm đến 10 ngày")
-    #     await selects.nth(3).select_option(label="Thời tiết điểm đến 10 ngày")
-    # except Exception:
-    #     pass
+    # Chọn dropdown nếu cần
+    await maybe_select_dropdowns(page)
 
+    # Tìm các input file (1: bản tin; 2: hồ sơ)
     file_inputs = page.locator('input[type="file"]')
     count = await file_inputs.count()
     if count < 1:
         raise RuntimeError("Không tìm thấy input type=file trên trang Upload.")
 
-    # Input 1: Bản tin
+    # Input 1: Bản tin (bắt buộc)
     await file_inputs.nth(0).set_input_files(str(bantin_path), timeout=TIMEOUT)
 
-    # Input 2: Hồ sơ (nếu có), nếu không thì dùng lại bản tin
-    if count >= 2:
-        await file_inputs.nth(1).set_input_files(str(hoso_path or bantin_path), timeout=TIMEOUT)
+    # Input 2: Hồ sơ — CHỈ đặt khi thật sự có file HS
+    if count >= 2 and hoso_path:
+        await file_inputs.nth(1).set_input_files(str(hoso_path), timeout=TIMEOUT)
+    else:
+        logging.info("Không có file HS hoặc trang chỉ có 1 input — chỉ upload bản tin.")
 
-    # Bấm Upload
+    # Bắt dialog (alert/confirm) nếu có sau khi upload
+    page.once("dialog", lambda d: (logging.info(f"Dialog: {d.message}"), d.accept()))
+
+    # Bấm Upload nhưng KHÔNG chờ điều hướng (ASP.NET postback hay treo)
+    clicked = False
+    selectors = [
+        "#cphContent_Button1",                       # ID thường thấy ở nút Upload
+        "input[type=submit][value*='Upload']",       # input submit
+        "button:has-text('Upload')"                  # button text
+    ]
+    for sel in selectors:
+        try:
+            await page.locator(sel).first.click(timeout=TIMEOUT, no_wait_after=True)
+            logging.info(f"Clicked upload by selector: {sel}")
+            clicked = True
+            break
+        except Exception as e:
+            logging.warning(f"Try click {sel} failed: {e}")
+
+    if not clicked:
+        raise RuntimeError("Không bấm được nút Upload bằng các selector đã thử.")
+
+    # Chủ động chờ mạng yên thay vì chờ "scheduled navigation"
     try:
-        await page.getByRole("button", name=lambda s: s.strip().lower() == "upload").click(timeout=5000)
+        await page.wait_for_load_state("networkidle", timeout=60_000)
     except Exception:
-        await page.locator("button:has-text('Upload'), input[type=submit][value*='Upload']").first.click(timeout=TIMEOUT)
+        await page.wait_for_timeout(5000)
 
-    await page.wait_for_timeout(5000)
     await page.screenshot(path="after_upload.png", full_page=True)
+    logging.info("Chụp after_upload.png sau Upload")
 
 async def main():
     load_dotenv()
@@ -127,7 +182,7 @@ async def main():
 
     bantin, hoso = pick_latest_files()
 
-    logging.info("=== Bắt đầu upload ===")
+    logging.info("=== Bắt đầu upload (Nghệ An) ===")
     logging.info(f"Login URL : {LOGIN_URL}")
     logging.info(f"Upload URL: {UPLOAD_URL}")
 
@@ -138,7 +193,7 @@ async def main():
         try:
             await login(page, username, password)
             await upload_file(page, bantin, hoso)
-            logging.info("Hoàn tất. Xem after_upload.png + uploader.log để xác nhận.")
+            logging.info("Hoàn tất. Xem after_upload.png + tools/uploader.log để xác nhận.")
         except Exception as e:
             logging.exception(f"Lỗi: {e}")
             try:
