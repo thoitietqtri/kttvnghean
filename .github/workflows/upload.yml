@@ -19,8 +19,8 @@ jobs:
     env:
       PORTAL_URL: ${{ secrets.PORTAL_URL }}   # vd: http://222.255.11.117:8888/Login.aspx
       UPLOAD_URL: ${{ secrets.UPLOAD_URL }}   # vd: http://222.255.11.117:8888/UploadFile.aspx
-      USERNAME:   ${{ secrets.USERNAME }}     # QTRI
-      PASSWORD:   ${{ secrets.PASSWORD }}     # Qtri
+      USERNAME:   ${{ secrets.USERNAME }}     # NGAN
+      PASSWORD:   ${{ secrets.PASSWORD }}     # NGAN
 
     steps:
       - name: Checkout repo
