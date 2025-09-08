@@ -90,7 +90,7 @@ async def upload_file(page, bantin_path: Path, hoso_path: Path | None):
     # Ví dụ:
     # selects = page.locator("select")
     # try:
-    #     await selects.nth(0).select_option(label="Quảng Trị")
+    #     await selects.nth(0).select_option(label="Nghệ An")
     #     await selects.nth(1).select_option(label="Khí tượng thủy văn Bình thường")
     #     await selects.nth(2).select_option(label="Thời tiết điểm đến 10 ngày")
     #     await selects.nth(3).select_option(label="Thời tiết điểm đến 10 ngày")
