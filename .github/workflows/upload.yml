@@ -1,9 +1,9 @@
-name: Auto Upload BanTin
+name: Auto Upload BanTin (Nghe an)
 
 on:
   schedule:
-    # 04:30 ICT hằng ngày = 21:30 UTC ngày hôm trước
-    - cron: '30 21 * * *'
+    # 04:00 ICT hằng ngày = 21:00 UTC ngày hôm trước
+    - cron: "0 21 * * *"
   workflow_dispatch:
 
 concurrency:
